@@ -1,2 +1,3 @@
 # ovirt-patch-verifier
-Simple lago-based script to aid with patch verification
+
+Simple lago plugin to aid with patch verification
