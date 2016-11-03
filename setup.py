@@ -12,7 +12,10 @@ setup(
     author_email='rmartins@redhat.com',
     packages=find_packages(),
     include_package_data=True,
-    install_requires=['lago'],
+    install_requires=[
+        'lago',
+        'requests',
+    ],
     entry_points={
         'lago.plugins.cli': [
             'opv = ovirt_patch_verifier:OvirtPatchVerifierCLI',
