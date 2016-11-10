@@ -48,10 +48,51 @@ class OvirtRelease(object):
                     'installed: %s') % e)
         if tar_content is None:
             raise RuntimeError('Failed to extract RPM')
-        rv = {}
         with tarfile.open(fileobj=StringIO.StringIO(tar_content)) as tar:
             for info in tar.getmembers():
                 if info.isfile() and info.name.endswith('.repo'):
                     filename = os.path.basename(info.name)
-                    rv[filename] = tar.extractfile(info).read()
-        return rv
+                    yield filename, tar.extractfile(info).read()
+
+    def get_repofile(self, distver):
+        dist = None
+        snapshot = None
+        dependencies = None
+        dependencies_fname = None
+
+        fc_match = re.match(r'fc([0-9]{2})', distver)
+        if fc_match is not None:
+            dist = 'fc'
+            dependencies_fname = 'ovirt-f%s-deps.repo' % fc_match.group(1)
+        if re.match(r'el([0-9]+)', distver):
+            dist = 'el'
+            dependencies_fname = 'ovirt-%s-deps.repo' % distver
+
+        if dist is None:
+            raise RuntimeError('Invalid distver: %s', distver)
+
+        for fname, content in self._fetch():
+            if fname == dependencies_fname:
+                dependencies = content
+            elif fname == 'ovirt-snapshot.repo':
+                snapshot = content.replace('@DIST@', dist)
+                snapshot = snapshot.replace('@URLKEY@', 'mirrorlist')
+
+        if dependencies is None:
+            raise RuntimeError('Failed to find repofile for distro: %s' %
+                               distver)
+
+        file_content = dependencies
+        if snapshot is not None:
+            file_content += '\n'
+            file_content += snapshot
+
+        rv = tempfile.NamedTemporaryFile(delete=False)
+
+        with rv as fp:
+            fp.write(dependencies)
+            if snapshot is not None:
+                fp.write('\n')
+                fp.write(snapshot)
+
+        return rv.name

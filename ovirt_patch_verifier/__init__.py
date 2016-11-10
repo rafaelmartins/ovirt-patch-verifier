@@ -15,6 +15,8 @@ from lago.utils import in_prefix, with_logging
 from lago.workdir import Workdir
 from ovirtlago import OvirtPrefix, OvirtWorkdir
 
+from .release import OvirtRelease
+
 
 VM_CONF = {
     'engine': {
@@ -175,7 +177,9 @@ def do_deploy(vm, custom_sources, workdir, **kwargs):
         raise
 
     rpm_repo = config.get('reposync_dir', '/var/lib/lago/reposync')  # FIXME
-    reposync_config = os.path.join(CURDIR, 'ovirt-master-snapshot.repo')
+
+    release = OvirtRelease('master')
+    reposync_config = release.get_repofile('el7')
 
     prefix = OvirtPrefix(os.path.join(workdir.path, prefix_name))
 
