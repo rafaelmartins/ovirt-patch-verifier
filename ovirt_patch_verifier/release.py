@@ -1,8 +1,8 @@
 import os
 import re
+import shutil
 import StringIO
 import subprocess
-import tarfile
 import tempfile
 
 import requests
@@ -35,27 +35,33 @@ class OvirtRelease(object):
     def _fetch(self):
         r = requests.get(self.RESOURCES_BASE_URL + self.rpm)
         r.raise_for_status()
-        rpm_files = ''
-        with tempfile.NamedTemporaryFile() as tmp:
-            tmp.file.write(r.content)
-            tmp.file.flush()
-            try:
-                rpm_files = subprocess.check_output(
-                    'rpm2cpio %s | cpio -idmv' % tmp.name,
-                    shell=True,
-                    stderr=subprocess.STDOUT,
-                )
-            except subprocess.CalledProcessError as e:
-                raise RuntimeError((
-                    'Failed to extract RPM, maybe you don\'t have rpm2cpio '
-                    'installed: %s') % e)
-        for f in rpm_files.splitlines():
-            f = f.strip()
-            if f.endswith('.repo'):
-                filename = os.path.basename(f)
-                with open(f) as fp:
-                    filecontent = fp.read()
-                yield filename, filecontent
+        tmpdir = None
+        try:
+            tmpdir = tempfile.mkdtemp()
+            p = subprocess.Popen(
+                'rpm2cpio | cpio -idmv',
+                shell=True,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                cwd=tmpdir,
+            )
+            rpm_files = p.communicate(r.content)[0]
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError((
+                'Failed to extract RPM, maybe you don\'t have rpm2cpio '
+                'installed: %s') % e)
+        else:
+            for f in rpm_files.splitlines():
+                f = f.strip()
+                if f.endswith('.repo'):
+                    filename = os.path.basename(f)
+                    with open(os.path.join(tmpdir, f)) as fp:
+                        filecontent = fp.read()
+                    yield filename, filecontent
+        finally:
+            if tmpdir is not None:
+                shutil.rmtree(tmpdir)
 
     def get_repofile(self, distver):
         dist = None
