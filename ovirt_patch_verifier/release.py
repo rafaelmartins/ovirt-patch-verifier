@@ -35,24 +35,27 @@ class OvirtRelease(object):
     def _fetch(self):
         r = requests.get(self.RESOURCES_BASE_URL + self.rpm)
         r.raise_for_status()
-        tar_content = None
+        rpm_files = ''
         with tempfile.NamedTemporaryFile() as tmp:
             tmp.file.write(r.content)
             tmp.file.flush()
             try:
-                tar_content = subprocess.check_output(['rpm2tar', '--stdout',
-                                                       tmp.name])
+                rpm_files = subprocess.check_output(
+                    'rpm2cpio %s | cpio -idmv' % tmp.name,
+                    shell=True,
+                    stderr=subprocess.STDOUT,
+                )
             except subprocess.CalledProcessError as e:
                 raise RuntimeError((
-                    'Failed to extract RPM, maybe you don\'t have rpm2targz '
+                    'Failed to extract RPM, maybe you don\'t have rpm2cpio '
                     'installed: %s') % e)
-        if tar_content is None:
-            raise RuntimeError('Failed to extract RPM')
-        with tarfile.open(fileobj=StringIO.StringIO(tar_content)) as tar:
-            for info in tar.getmembers():
-                if info.isfile() and info.name.endswith('.repo'):
-                    filename = os.path.basename(info.name)
-                    yield filename, tar.extractfile(info).read()
+        for f in rpm_files.splitlines():
+            f = f.strip()
+            if f.endswith('.repo'):
+                filename = os.path.basename(f)
+                with open(f) as fp:
+                    filecontent = fp.read()
+                yield filename, filecontent
 
     def get_repofile(self, distver):
         dist = None

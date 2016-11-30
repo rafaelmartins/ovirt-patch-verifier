@@ -5,7 +5,7 @@ import os
 import shutil
 import sys
 
-from lago import config
+from lago.config import config
 from lago.log_utils import setup_prefix_logging
 from lago.plugins import load_plugins
 from lago.plugins.cli import CLIPlugin, cli_plugin, cli_plugin_add_argument, \
@@ -29,7 +29,7 @@ VM_CONF = {
         ],
         'disks': [
             {
-                'template_name': 'el7-base',
+                'template_name': '##',
                 'type': 'template',
                 'name': 'root',
                 'dev': 'vda',
@@ -68,7 +68,7 @@ VM_CONF = {
         ],
         'disks': [
             {
-                'template_name': 'el7-base',
+                'template_name': '##',
                 'type': 'template',
                 'name': 'root',
                 'dev': 'vda',
@@ -111,6 +111,16 @@ in_ovirt_prefix = in_prefix(
     dest='custom_sources',
 )
 @cli_plugin_add_argument(
+    '--dist',
+    help='define which distribution and version should be used as base',
+    default='el7',
+)
+@cli_plugin_add_argument(
+    '--release',
+    help='define which oVirt release should be used as base',
+    default='master',
+)
+@cli_plugin_add_argument(
     'workdir',
     help=(
         'orkdir directory of the deployment, if none passed, it will use '
@@ -121,7 +131,13 @@ in_ovirt_prefix = in_prefix(
     nargs='?',
     default=None,
 )
-def do_deploy(vm, custom_sources, workdir, **kwargs):
+def do_deploy(vm, custom_sources, dist, release, workdir, **kwargs):
+    # fix VM_CONF templates
+    for vm_type in VM_CONF:
+        for disk in VM_CONF[vm_type]['disks']:
+            if 'template_name' in disk and disk['template_name'] == '##':
+                disk['template_name'] = '%s-base' % dist
+
     domains = {}
     for v in vm:
         try:
@@ -164,10 +180,12 @@ def do_deploy(vm, custom_sources, workdir, **kwargs):
     setup_prefix_logging(prefix.paths.logs())
 
     try:
-        template_repo_path = os.path.join(CURDIR, 'template-repo.json')
-        repo = TemplateRepository.from_url(template_repo_path)
+        repo = TemplateRepository.from_url(
+            'http://templates.ovirt.org/repo/repo.metadata'
+        )
 
-        template_store_path = config.get('template_store', default=None)
+        template_store_path = config.get('template_store',
+                                         '/var/lib/lago/store')
         store = TemplateStore(template_store_path)
 
         prefix.virt_conf(conf, repo, store, do_bootstrap=True)
@@ -178,8 +196,8 @@ def do_deploy(vm, custom_sources, workdir, **kwargs):
 
     rpm_repo = config.get('reposync_dir', '/var/lib/lago/reposync')  # FIXME
 
-    release = OvirtRelease('master')
-    reposync_config = release.get_repofile('el7')
+    release = OvirtRelease(release)
+    reposync_config = release.get_repofile(dist)
 
     prefix = OvirtPrefix(os.path.join(workdir.path, prefix_name))
 
