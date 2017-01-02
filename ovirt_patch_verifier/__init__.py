@@ -17,6 +17,8 @@ from ovirtlago import OvirtPrefix, OvirtWorkdir
 
 from .release import OvirtRelease
 
+cwd = os.path.dirname(os.path.abspath(__file__))
+
 
 VM_CONF = {
     'engine': {
@@ -54,7 +56,15 @@ VM_CONF = {
         ],
         'metadata': {
             'ovirt-engine-password': '123',
-            'deploy-scripts': [],
+            'deploy-scripts': [
+                os.path.join(cwd, 'deploy_scripts', 'add_local_repo.sh'),
+
+                # this needs to be tested/fixed on fedora
+                os.path.join(cwd, 'deploy_scripts',
+                             'setup_storage_unified.sh'),
+
+                os.path.join(cwd, 'deploy_scripts', 'setup_engine.sh'),
+            ],
         },
     },
 
@@ -77,7 +87,10 @@ VM_CONF = {
         ],
         'metadata': {
             'ovirt-capabilities': 'snapshot-live-merge',
-            'deploy-scripts': [],
+            'deploy-scripts': [
+                # this needs to be tested/fixed on fedora
+                os.path.join(cwd, 'deploy_scripts', 'setup_host.sh'),
+            ],
         },
     },
 }
@@ -194,7 +207,8 @@ def do_deploy(vm, custom_sources, dist, release, workdir, **kwargs):
         shutil.rmtree(prefix.paths.prefixed(''), ignore_errors=True)
         raise
 
-    rpm_repo = config.get('reposync_dir', '/var/lib/lago/reposync')  # FIXME
+    rpm_repo = config.get('opv_reposync_dir', '/var/lib/lago/opv/reposync')
+    rpm_repo = '%s/%s-%s' % (rpm_repo, dist, release)
 
     release = OvirtRelease(release)
     reposync_config = release.get_repofile(dist)
