@@ -5,6 +5,7 @@ import os
 import shutil
 import sys
 
+from configparser import SafeConfigParser
 from lago.config import config
 from lago.log_utils import setup_prefix_logging
 from lago.plugins import load_plugins
@@ -13,7 +14,7 @@ from lago.plugins.cli import CLIPlugin, cli_plugin, cli_plugin_add_argument, \
 from lago.templates import TemplateRepository, TemplateStore
 from lago.utils import in_prefix, with_logging
 from lago.workdir import Workdir
-from ovirtlago import OvirtPrefix, OvirtWorkdir
+from ovirtlago import LogTask, OvirtPrefix, OvirtWorkdir, reposetup
 
 from .release import OvirtRelease
 
@@ -211,18 +212,43 @@ def do_deploy(vm, custom_sources, dist, release, workdir, **kwargs):
     rpm_repo = '%s/%s-%s' % (rpm_repo, dist, release)
 
     release = OvirtRelease(release)
-    reposync_config = release.get_repofile(dist)
+    reposync_yum_config = release.get_repofile(dist)
 
     prefix = OvirtPrefix(os.path.join(workdir.path, prefix_name))
 
-    prefix.prepare_repo(
-        rpm_repo=rpm_repo,
-        reposync_yum_config=reposync_config,
-        skip_sync=False,
-        custom_sources=custom_sources,
-    )
+    with LogTask('Create prefix internal repo'):
+        all_dists = [dist]
+        repos = []
+
+        if rpm_repo and reposync_yum_config:
+            parser = SafeConfigParser()
+
+            with open(reposync_yum_config) as repo_conf_fd:
+                parser.readfp(repo_conf_fd)
+
+            repos = parser.sections()
+
+            if len(parser.sections()) > 0:
+                with LogTask(
+                    'Syncing remote repos locally (this might take some time)'
+                ):
+                    reposetup.sync_rpm_repository(
+                        rpm_repo,
+                        reposync_yum_config,
+                        repos,
+                    )
+
+        prefix._create_rpm_repository(
+            dists=all_dists,
+            repos_path=rpm_repo,
+            repo_names=repos,
+            custom_sources=custom_sources or [],
+        )
+        prefix.save()
 
     prefix.start()
+
+    print prefix.paths.internal_repo()
     prefix.deploy()
 
 
