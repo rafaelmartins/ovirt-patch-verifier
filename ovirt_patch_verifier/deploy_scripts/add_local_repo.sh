@@ -17,3 +17,10 @@ EOF
 
 sed -i "s/var\/cache/dev\/shm/g" /etc/yum.conf
 echo "persistdir=/dev/shm" >> /etc/yum.conf
+
+# disable any other repos to avoid downloading metadata
+#yum install --disablerepo=\* --enablerepo=alocalsync -y yum-utils
+#yum install -y yum-utils
+#yum-config-manager --disable \*
+#yum-config-manager --enable alocalsync
+

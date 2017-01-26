@@ -9,12 +9,10 @@ from configparser import SafeConfigParser
 from lago.config import config
 from lago.log_utils import setup_prefix_logging
 from lago.plugins import load_plugins
-from lago.plugins.cli import CLIPlugin, cli_plugin, cli_plugin_add_argument, \
-     cli_plugin_add_help
+from lago.plugins.cli import CLIPlugin, cli_plugin, cli_plugin_add_argument
 from lago.templates import TemplateRepository, TemplateStore
-from lago.utils import in_prefix, with_logging
 from lago.workdir import Workdir
-from ovirtlago import LogTask, OvirtPrefix, OvirtWorkdir, reposetup
+from ovirtlago import LogTask, OvirtPrefix, reposetup
 
 from .release import OvirtRelease
 
@@ -43,16 +41,16 @@ VM_CONF = {
                 'size': '101G',
                 'type': 'empty',
                 'name': 'nfs',
-                'dev': 'vdb',
-                'format': 'qcow2',
+                'dev': 'sda',
+                'format': 'raw',
             },
             {
                 'comment': 'Main iSCSI device',
                 'size': '101G',
                 'type': 'empty',
                 'name': 'iscsi',
-                'dev': 'vdc',
-                'format': 'qcow2',
+                'dev': 'sdc',
+                'format': 'raw',
             },
         ],
         'metadata': {
@@ -89,6 +87,8 @@ VM_CONF = {
         'metadata': {
             'ovirt-capabilities': 'snapshot-live-merge',
             'deploy-scripts': [
+                os.path.join(cwd, 'deploy_scripts', 'add_local_repo.sh'),
+
                 # this needs to be tested/fixed on fedora
                 os.path.join(cwd, 'deploy_scripts', 'setup_host.sh'),
             ],
@@ -100,11 +100,6 @@ VM_CONF = {
 LOGGER = logging.getLogger(__name__)
 
 CURDIR = os.path.dirname(os.path.abspath(__file__))
-
-in_ovirt_prefix = in_prefix(
-    prefix_class=OvirtPrefix,
-    workdir_class=OvirtWorkdir,
-)
 
 
 @cli_plugin(help='deploy ovirt-patch-verifier machines')
@@ -250,27 +245,6 @@ def do_deploy(vm, custom_sources, dist, release, workdir, **kwargs):
 
     print prefix.paths.internal_repo()
     prefix.deploy()
-
-
-@cli_plugin(help='destroy ovirt-patch-verifier machines')
-@cli_plugin_add_argument(
-    '-y',
-    '--yes',
-    help="don't ask for confirmation, assume yes",
-    action='store_true',
-)
-@in_ovirt_prefix
-def do_destroy(yes, parent_workdir, **kwargs):
-    if not yes:
-        response = raw_input(
-            'Do you really want to destroy ovirt-patch-verifier workdir? '
-            '[Yn] '
-        )
-        if response and response[0] not in 'Yy':
-            LOGGER.info('Aborting on user input')
-            return
-
-    parent_workdir.destroy()
 
 
 def _populate_parser(cli_plugins, parser):

@@ -1,7 +1,6 @@
 import os
 import re
 import shutil
-import StringIO
 import subprocess
 import tempfile
 
