@@ -13,7 +13,6 @@ setup(
     packages=find_packages(),
     include_package_data=True,
     install_requires=[
-        'configparser',
         'lago',
         'requests',
     ],
@@ -23,7 +22,6 @@ setup(
         ],
         'lago.plugins.opv.cli': [
             'deploy = ovirt_patch_verifier:do_deploy',
-            'destroy = ovirt_patch_verifier:do_destroy',
         ],
     },
 )

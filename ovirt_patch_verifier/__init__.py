@@ -5,97 +5,16 @@ import os
 import shutil
 import sys
 
-from configparser import SafeConfigParser
 from lago.config import config
 from lago.log_utils import setup_prefix_logging
 from lago.plugins import load_plugins
 from lago.plugins.cli import CLIPlugin, cli_plugin, cli_plugin_add_argument
 from lago.templates import TemplateRepository, TemplateStore
 from lago.workdir import Workdir
-from ovirtlago import LogTask, OvirtPrefix, reposetup
+from ovirtlago import OvirtPrefix
 
 from .release import OvirtRelease
-
-cwd = os.path.dirname(os.path.abspath(__file__))
-
-
-VM_CONF = {
-    'engine': {
-        'vm-type': 'ovirt-engine',
-        'memory': 4096,
-        'nics': [
-            {
-                'net': 'ovirt-patch-verifier',
-            },
-        ],
-        'disks': [
-            {
-                'template_name': '##',
-                'type': 'template',
-                'name': 'root',
-                'dev': 'vda',
-                'format': 'qcow2',
-            },
-            {
-                'comment': 'Main NFS device',
-                'size': '101G',
-                'type': 'empty',
-                'name': 'nfs',
-                'dev': 'sda',
-                'format': 'raw',
-            },
-            {
-                'comment': 'Main iSCSI device',
-                'size': '101G',
-                'type': 'empty',
-                'name': 'iscsi',
-                'dev': 'sdc',
-                'format': 'raw',
-            },
-        ],
-        'metadata': {
-            'ovirt-engine-password': '123',
-            'deploy-scripts': [
-                os.path.join(cwd, 'deploy_scripts', 'add_local_repo.sh'),
-
-                # this needs to be tested/fixed on fedora
-                os.path.join(cwd, 'deploy_scripts',
-                             'setup_storage_unified.sh'),
-
-                os.path.join(cwd, 'deploy_scripts', 'setup_engine.sh'),
-            ],
-        },
-    },
-
-    'host': {
-        'vm-type': 'ovirt-host',
-        'memory': 2047,
-        'nics': [
-            {
-                'net': 'ovirt-patch-verifier',
-            },
-        ],
-        'disks': [
-            {
-                'template_name': '##',
-                'type': 'template',
-                'name': 'root',
-                'dev': 'vda',
-                'format': 'qcow2',
-            },
-        ],
-        'metadata': {
-            'ovirt-capabilities': 'snapshot-live-merge',
-            'deploy-scripts': [
-                os.path.join(cwd, 'deploy_scripts', 'add_local_repo.sh'),
-
-                # this needs to be tested/fixed on fedora
-                os.path.join(cwd, 'deploy_scripts', 'setup_host.sh'),
-            ],
-        },
-    },
-}
-
+from .machines import get_definition_from_settings
 
 LOGGER = logging.getLogger(__name__)
 
@@ -120,11 +39,6 @@ CURDIR = os.path.dirname(os.path.abspath(__file__))
     dest='custom_sources',
 )
 @cli_plugin_add_argument(
-    '--dist',
-    help='define which distribution and version should be used as base',
-    default='el7',
-)
-@cli_plugin_add_argument(
     '--release',
     help='define which oVirt release should be used as base',
     default='master',
@@ -140,22 +54,23 @@ CURDIR = os.path.dirname(os.path.abspath(__file__))
     nargs='?',
     default=None,
 )
-def do_deploy(vm, custom_sources, dist, release, workdir, **kwargs):
-    # fix VM_CONF templates
-    for vm_type in VM_CONF:
-        for disk in VM_CONF[vm_type]['disks']:
-            if 'template_name' in disk and disk['template_name'] == '##':
-                disk['template_name'] = '%s-base' % dist
-
+def do_deploy(vm, custom_sources, release, workdir, **kwargs):
+    dist = None
     domains = {}
     for v in vm:
-        try:
-            name, type_ = v.split('=', 1)
-            domains[name] = VM_CONF[type_]
-        except ValueError:
-            raise RuntimeError('Invalid value for --vm: %s' % v)
-        except KeyError:
-            raise RuntimeError('Invalid vm type for "%s": %s' % (name, type))
+        m = get_definition_from_settings(v)
+        if m is None:
+            raise RuntimeError('Invalid VM definition: %s' % v)
+
+        if dist is None:
+            dist = m.distro.split('.')[0]
+        elif dist != m.distro.split('.')[0]:
+            raise RuntimeError('All the VMs must use the same distro')
+
+        domains[m.name] = m.to_dict()
+
+    if dist is None:
+        raise RuntimeError('Failed to detect distro')
 
     conf = {
         'domains': domains,
@@ -167,6 +82,7 @@ def do_deploy(vm, custom_sources, dist, release, workdir, **kwargs):
                     'end': 254,
                 },
                 'management': True,
+                'dns_domain_name': 'lago.local',
             },
         },
     }
@@ -203,47 +119,21 @@ def do_deploy(vm, custom_sources, dist, release, workdir, **kwargs):
         shutil.rmtree(prefix.paths.prefixed(''), ignore_errors=True)
         raise
 
-    rpm_repo = config.get('opv_reposync_dir', '/var/lib/lago/opv/reposync')
-    rpm_repo = '%s/%s-%s' % (rpm_repo, dist, release)
+    rpm_repo = config.get('reposync_dir', '/var/lib/lago/reposync')
 
     release = OvirtRelease(release)
     reposync_yum_config = release.get_repofile(dist)
 
     prefix = OvirtPrefix(os.path.join(workdir.path, prefix_name))
-
-    with LogTask('Create prefix internal repo'):
-        all_dists = [dist]
-        repos = []
-
-        if rpm_repo and reposync_yum_config:
-            parser = SafeConfigParser()
-
-            with open(reposync_yum_config) as repo_conf_fd:
-                parser.readfp(repo_conf_fd)
-
-            repos = parser.sections()
-
-            if len(parser.sections()) > 0:
-                with LogTask(
-                    'Syncing remote repos locally (this might take some time)'
-                ):
-                    reposetup.sync_rpm_repository(
-                        rpm_repo,
-                        reposync_yum_config,
-                        repos,
-                    )
-
-        prefix._create_rpm_repository(
-            dists=all_dists,
-            repos_path=rpm_repo,
-            repo_names=repos,
-            custom_sources=custom_sources or [],
-        )
-        prefix.save()
+    prefix.prepare_repo(
+        rpm_repo=rpm_repo,
+        reposync_yum_config=reposync_yum_config,
+        skip_sync=False,
+        custom_sources=custom_sources or [],
+    )
 
     prefix.start()
 
-    print prefix.paths.internal_repo()
     prefix.deploy()
 
 
