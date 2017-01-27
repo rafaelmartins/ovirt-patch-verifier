@@ -1,0 +1,5 @@
+include README.md
+include LICENSE
+include ovirt-patch-verifier.spec
+recursive-include ovirt_patch_verifier/answer-files *
+recursive-include ovirt_patch_verifier/machines/deploy-scripts *

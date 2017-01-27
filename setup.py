@@ -14,6 +14,7 @@ setup(
     include_package_data=True,
     install_requires=[
         'lago',
+        'ovirtsdk',
         'requests',
     ],
     entry_points={
