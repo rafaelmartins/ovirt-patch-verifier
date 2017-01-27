@@ -10,8 +10,10 @@ from lago.log_utils import setup_prefix_logging
 from lago.plugins import load_plugins
 from lago.plugins.cli import CLIPlugin, cli_plugin, cli_plugin_add_argument
 from lago.templates import TemplateRepository, TemplateStore
+from lago.utils import func_vector, in_prefix, with_logging, VectorThread
 from lago.workdir import Workdir
-from ovirtlago import OvirtPrefix
+from ovirtlago import LogTask, OvirtPrefix, OvirtWorkdir
+from ovirtsdk.xml import params
 
 from .release import OvirtRelease
 from .machines import get_definition_from_settings
@@ -19,6 +21,11 @@ from .machines import get_definition_from_settings
 LOGGER = logging.getLogger(__name__)
 
 CURDIR = os.path.dirname(os.path.abspath(__file__))
+
+in_ovirt_prefix = in_prefix(
+    prefix_class=OvirtPrefix,
+    workdir_class=OvirtWorkdir,
+)
 
 
 @cli_plugin(help='deploy ovirt-patch-verifier machines')
@@ -46,7 +53,7 @@ CURDIR = os.path.dirname(os.path.abspath(__file__))
 @cli_plugin_add_argument(
     'workdir',
     help=(
-        'orkdir directory of the deployment, if none passed, it will use '
+        'workdir directory of the deployment, if none passed, it will use '
         '$PWD/deployment_ovirt-patch-verifier'
     ),
     metavar='WORKDIR',
@@ -135,6 +142,57 @@ def do_deploy(vm, custom_sources, release, workdir, **kwargs):
     prefix.start()
 
     prefix.deploy()
+
+
+@cli_plugin(help='setup ovirt-engine machine')
+@cli_plugin_add_argument(
+    '--answer-file',
+    help='use custom ovirt-engine answer-file',
+    metavar='ANSWER-FILE',
+)
+@in_ovirt_prefix
+@with_logging
+def do_engine_setup(prefix, answer_file=None, **kwargs):
+    engine = prefix.virt_env.engine_vm()
+    answer_file_src = os.path.join(CURDIR, 'answer-files', 'default.conf')
+    if answer_file is not None:
+        answer_file_src = answer_file
+    engine.copy_to(answer_file_src, '/tmp/answer-file')
+
+    with LogTask('Run engine-setup'):
+        result = engine.ssh(['engine-setup',
+                             '--config-append=/tmp/answer-file'])
+        if result.code != 0:
+            raise RuntimeError('Failed to run engine-setup')
+
+        engine.ssh(['rm', '-rf', '/dev/shm/yum', '/dev/shm/yumdb',
+                    '/dev/shm/*.rpm'])
+        engine.ssh(['systemctl', 'stop', 'firewalld'])
+
+    with LogTask('Configuring hosts'):
+        api = prefix.virt_env.engine_vm().get_api()
+
+        def _add_host(vm):
+            p = params.Host(
+                name=vm.name(),
+                address=vm.ip(),
+                cluster=params.Cluster(
+                    name='Default',
+                ),
+                root_password=vm.root_password(),
+                override_iptables=True,
+            )
+            return api.hosts.add(p)
+
+        hosts = prefix.virt_env.host_vms()
+
+        vec = func_vector(_add_host, [(h,) for h in hosts])
+        vt = VectorThread(vec)
+        vt.start_all()
+        vt.join_all()
+
+        for host in hosts:
+            host.ssh(['rm', '-rf', '/dev/shm/yum', '/dev/shm/*.rpm'])
 
 
 def _populate_parser(cli_plugins, parser):

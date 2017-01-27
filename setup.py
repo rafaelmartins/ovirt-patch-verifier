@@ -22,6 +22,7 @@ setup(
         ],
         'lago.plugins.opv.cli': [
             'deploy = ovirt_patch_verifier:do_deploy',
+            'engine-setup = ovirt_patch_verifier:do_engine_setup',
         ],
     },
 )
