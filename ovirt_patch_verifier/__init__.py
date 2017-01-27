@@ -55,6 +55,9 @@ CURDIR = os.path.dirname(os.path.abspath(__file__))
     default=None,
 )
 def do_deploy(vm, custom_sources, release, workdir, **kwargs):
+    release = OvirtRelease(release)
+    release_script = release.get_install_script()
+
     dist = None
     domains = {}
     for v in vm:
@@ -68,6 +71,7 @@ def do_deploy(vm, custom_sources, release, workdir, **kwargs):
             raise RuntimeError('All the VMs must use the same distro')
 
         domains[m.name] = m.to_dict()
+        domains[m.name]['metadata']['deploy-scripts'].insert(0, release_script)
 
     if dist is None:
         raise RuntimeError('Failed to detect distro')
@@ -121,13 +125,9 @@ def do_deploy(vm, custom_sources, release, workdir, **kwargs):
 
     rpm_repo = config.get('reposync_dir', '/var/lib/lago/reposync')
 
-    release = OvirtRelease(release)
-    reposync_yum_config = release.get_repofile(dist)
-
     prefix = OvirtPrefix(os.path.join(workdir.path, prefix_name))
     prefix.prepare_repo(
         rpm_repo=rpm_repo,
-        reposync_yum_config=reposync_yum_config,
         skip_sync=False,
         custom_sources=custom_sources or [],
     )

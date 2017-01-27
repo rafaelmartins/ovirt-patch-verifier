@@ -104,3 +104,15 @@ class OvirtRelease(object):
                 fp.write(snapshot)
 
         return rv.name
+
+    def get_install_script(self):
+        rv = tempfile.NamedTemporaryFile(delete=False)
+
+        with rv as fp:
+            fp.write('''\
+set -ex
+
+yum install -y --downloaddir=/dev/shm %s%s
+''' % (self.RESOURCES_BASE_URL, self.rpm))
+
+        return rv.name
